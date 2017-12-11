@@ -19,16 +19,19 @@ import sys
 import imp
 import hashlib
 import sysconfig
+from pathlib import Path
 from os.path import join
 from distutils.core import setup, Extension, Command
 from distutils.dist import Distribution
 from distutils.command.build import build
 from distutils.command.build_ext import build_ext
 from distutils.command.install import install
-from src.config import DEFAULT_KEY, TEST_DIR, SRC_DIR, PY_SRC_DIR, EXT_SRC_DIR, EXE_SRC_DIR, SECRET_HEADER_PATH
+from Cython.Distutils import build_ext
+from shutil import copyfile
+
+from src.config import DEFAULT_KEY, TEST_DIR, PY_SRC_DIR, EXT_SRC_DIR, EXE_SRC_DIR, SECRET_HEADER_PATH
 
 PY2 = sys.version_info[0] < 3
-
 
 # .rst should created by pyconcrete-admin
 if os.path.exists('README.rst'):
@@ -39,9 +42,9 @@ with open(readme_path, 'r') as f:
     readme = f.read()
 
 try:
-   input = raw_input
+    input = raw_input
 except NameError:
-   pass
+    pass
 
 
 def is_mingw():
@@ -134,7 +137,8 @@ class CmdBase:
         self.manual_create_secrete_key_file = not os.path.exists(SECRET_HEADER_PATH)
         if self.manual_create_secrete_key_file:
             if not self.passphrase:
-                self.passphrase = input("please input the passphrase \nfor encrypt your python script (enter for default) : \n")
+                self.passphrase = input(
+                    "please input the passphrase \nfor encrypt your python script (enter for default) : \n")
                 if len(self.passphrase) == 0:
                     self.passphrase = DEFAULT_KEY
                 else:
@@ -165,6 +169,27 @@ class BuildEx(CmdBase, build):
         ret = build.run(self)
         self.post_process()
         return ret
+
+
+class BuildCythonExt(build_ext):
+    def run(self):
+        super().run()
+        build_dir = Path(self.build_lib)
+        root_dir = Path(__file__).parent
+        root_src = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'src')
+        py_source_path = os.path.join(root_src, 'pyconcrete')
+        target_dir = build_dir if not self.inplace else root_dir
+        for dirname, dirnames, filenames in os.walk(py_source_path):
+            for f in ['test', 'build', 'tests', '.git']:
+                if f in dirnames:
+                    dirnames.remove(f)
+
+            for filename in filenames:
+                if filename == '__init__.py':
+                    fullpath = os.path.join(dirname, filename)
+                    relfile = os.path.relpath(fullpath, root_src)
+                    target_path = os.path.join(target_dir.absolute().__str__(), relfile)
+                    copyfile(fullpath, target_path)
 
 
 class BuildExe(CmdBase, build_ext):
@@ -269,6 +294,7 @@ class InstallEx(CmdBase, install):
         self.copy_file(os.path.join(self.build_scripts, exe_name),
                        os.path.join(self.install_scripts, exe_name))
 
+
 # ================================================= test command ================================================= #
 
 
@@ -292,7 +318,8 @@ class TestEx(Command):
 
 def get_include_dirs():
     openaes_include_dirs = [
-        join(EXT_SRC_DIR),
+        join(EXE_SRC_DIR, ''),
+        join(EXT_SRC_DIR, ''),
         join(EXT_SRC_DIR, 'openaes', 'inc'),
     ]
     if is_msvc() and PY2:  # Only Python 2.7 & 3.2 Need VisualStudio 2008 (without stdint.h)
@@ -340,9 +367,16 @@ ext_module = Extension(
     include_dirs=include_dirs,
     libraries=get_libraries(include_python_lib=False),
     sources=[
-        join(EXT_SRC_DIR, 'pyconcrete.c'),
-        join(EXT_SRC_DIR, 'pyconcrete_module.c'),
-    ] + openaes_sources,
+                join(EXT_SRC_DIR, 'pyconcrete.c'),
+                join(EXT_SRC_DIR, 'pyconcrete_module.c'),
+            ] + openaes_sources,
+)
+
+ext_module_pyconcrete = Extension(
+    'pyconcrete.meta_path',
+    sources=[
+        join(PY_SRC_DIR, 'meta_path.py'),
+    ],
 )
 
 exe_module = Extension(
@@ -351,9 +385,9 @@ exe_module = Extension(
     libraries=get_libraries(include_python_lib=True),
     extra_link_args=get_exe_link_args(),
     sources=[
-        join(EXE_SRC_DIR, 'pyconcrete_exe.c'),
-        join(EXT_SRC_DIR, 'pyconcrete.c'),
-    ] + openaes_sources,
+                join(EXE_SRC_DIR, 'pyconcrete_exe.c'),
+                join(EXT_SRC_DIR, 'pyconcrete.c'),
+            ] + openaes_sources,
 )
 
 # ================================================= setup ================================================= #
@@ -370,10 +404,11 @@ setup(
     author_email='falldog7@gmail.com',
     url='https://github.com/Falldog/pyconcrete',
     license="Apache License 2.0",
-    ext_modules=[ext_module],
+    ext_modules=[ext_module, ext_module_pyconcrete],
     exe_modules=[exe_module],
     cmdclass={
         "build": BuildEx,
+        "build_ext": BuildCythonExt,
         "build_exe": BuildExe,
         "install": InstallEx,
         "test": TestEx,
@@ -381,12 +416,6 @@ setup(
     scripts=[
         'pyconcrete-admin.py',
     ],
-    packages=[
-        'pyconcrete',
-    ],
-    package_dir={
-        '': SRC_DIR,
-    },
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
