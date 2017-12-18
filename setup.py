@@ -19,6 +19,8 @@ import sys
 import imp
 import hashlib
 import sysconfig
+import string
+from random import *
 from pathlib import Path
 from os.path import join
 from distutils.core import setup, Extension, Command
@@ -129,6 +131,12 @@ class ExeDistribution(Distribution):
         return self.exe_modules and len(self.exe_modules) > 0
 
 
+def random_encrypt():
+    min_char = 8
+    max_char = 12
+    allchar = string.ascii_letters + string.punctuation + string.digits
+    return "".join(choice(allchar) for x in range(randint(min_char, max_char)))
+
 # ================================================= command ================================================= #
 
 
@@ -137,14 +145,8 @@ class CmdBase:
         self.manual_create_secrete_key_file = not os.path.exists(SECRET_HEADER_PATH)
         if self.manual_create_secrete_key_file:
             if not self.passphrase:
-                self.passphrase = input(
-                    "please input the passphrase \nfor encrypt your python script (enter for default) : \n")
-                if len(self.passphrase) == 0:
-                    self.passphrase = DEFAULT_KEY
-                else:
-                    passphrase2 = input("please input again to confirm\n")
-                    if self.passphrase != passphrase2:
-                        raise Exception("Passphrase is different")
+                self.passphrase = random_encrypt()
+                print(self.passphrase)
 
             k, f = hash_key(self.passphrase.encode('utf8'))
             create_secret_key_header(k, f)
